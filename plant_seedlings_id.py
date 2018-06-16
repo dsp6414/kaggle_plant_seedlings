@@ -37,7 +37,7 @@ data_transforms = {
 image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),
                                           data_transforms[x])
                   for x in ['train', 'val']}
-dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=4,
+dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=32,
                                              shuffle=True, num_workers=4)
               for x in ['train', 'val']}
 dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
@@ -114,33 +114,98 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
     model.load_state_dict(best_model_wts)
     return model
 
+def freeze_first_n_layers(model, numb_layers):
+    '''
+    Freezing the first numb_layers of a model
+    :param model:
+    :param numb_layers:
+    :return:
+    '''
+    for name, child in model.named_children():
+        numb_layers -= 1
+        for name2, params in child.named_parameters():
+            params.requires_grad = (numb_layers <= 0)
+
+        return model
+
+def get_param_list(model, lr):
+    '''
+    apply learning rate list evenly to model layers
+    return a parametized list of learning rates
+
+    :param model:
+    :param lr: list[the last is the fc layer learning rate, the rest are divided amongst the layers
+    :return:
+    '''
+    numb_layers = 0
+    for name, module in model_conv.named_children():
+        if ('layer') in name:
+            numb_layers += 1
+
+    # get num layers per learning rate
+    nlplr = numb_layers // (len(lr) - 1)
+
+    params_dict = dict(model_conv.named_parameters())
+    params = []
+    for key, value in params_dict.items():
+        # print(key)
+        if key[:len("layer")] == "layer":
+            # probably looks like layer1.0.xxxxx
+            # get the layer1 bit
+
+            layer_number = int(key[len("layer"):].split('.')[0])
+            params += [{'params': [value], 'lr': lr[layer_number // nlplr]}]
+        elif key[:len("fc")] == "fc":
+            params += [{'params': [value], 'lr': lr[len(lr) - 1]}]
+    return params
+
+#######################################
 #load pretrained model
-model_conv = torchvision.models.resnet18(pretrained=True)
+model_conv = torchvision.models.resnet50(pretrained=True)
+
+#freeze all but last layer
 for param in model_conv.parameters():
     param.requires_grad = False
 
-# Parameters of newly constructed modules have requires_grad=True by default
-num_ftrs = model_conv.fc.in_features
-model_conv.fc = nn.Linear(num_ftrs, 12)
-
+#inputs and outputs to fc layer
+num_linear_inputs = model_conv.fc.in_features
+num_outputs = 12 # number of weedlings
+model_conv.fc = nn.Linear(num_linear_inputs, num_outputs)
 model_conv = model_conv.to(device)
 
 criterion = nn.CrossEntropyLoss()
+opt = optim.Adam(model_conv.fc.parameters(), lr=0.001, weight_decay=1e-5)
+exp_lr_scheduler = lr_scheduler.StepLR(opt, step_size=7, gamma=0.1) # Decay LR by a factor of 0.1 every 7 epochs
 
-# Observe that only parameters of final layer are being optimized as
-# opoosed to before.
-optimizer_conv = optim.SGD(model_conv.fc.parameters(), lr=0.001, momentum=0.9)
+#######################################
+# train just fc layer
+model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler, num_epochs=4)
 
-# Decay LR by a factor of 0.1 every 7 epochs
-exp_lr_scheduler = lr_scheduler.StepLR(optimizer_conv, step_size=7, gamma=0.1)
+#######################################
+#unfreeze it all and retrain using differential learning rates
+for param in model_conv.parameters():
+    param.requires_grad = True
 
+model_conv = model_conv.to(device)
 
-# train a classifier
-model_ft = train_model(model_conv, criterion, optimizer_conv, exp_lr_scheduler,
-                       num_epochs=25)
+# now train whole thing with diferential learning rates
+lrs = [.0001, .00033, .001]
+params = get_param_list(model_conv, lrs)
+opt = optim.Adam(params, lr=.0001, eps=1e-8, weight_decay=1e-5 )
 
-# unfreeze
+# fine tune
+model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,
+                       num_epochs=4)
 
-# train again
+# generate final submission
+test_data_transform = transforms.Compose([
+         transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+image_dataset = datasets.ImageFolder(root=os.path.join(data_dir, 'test'),
+                                           transform=test_data_transform)
+dataset_loader = torch.utils.data.DataLoader(image_dataset,
+                                             batch_size=4, shuffle=False,
+                                             num_workers=4)
+model_ft
 
-# final submission

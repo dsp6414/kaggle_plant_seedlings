@@ -1,9 +1,11 @@
 # imports
-
+'''
+splits train set into train and validate folders
+balances dataset by making copies of images
+'''
 import os
 import operator
 from shutil import copyfile
-
 
 #Add a ref to directory where train/test data is
 data_dir = "/home/keith/data/plant_seedlings/"
@@ -40,22 +42,23 @@ for key, value in allfiles.items():
         os.rename(src,dst)
 
 #find max numb images in train (scaled to .8)
-biggest = max(allfiles.items(), key=operator.itemgetter(1))[1]*(1-val_percent)
+balance_dataset_by_duplicating_images = False
+if (balance_dataset_by_duplicating_images is True):
+    biggest = max(allfiles.items(), key=operator.itemgetter(1))[1]*(1-val_percent)
 
-
-# balance the training dataset
-for key, _ in allfiles.items():
-    dir = os.path.join(data_dir_train, key)
-    files = os.listdir(dir)
-    numb_files = len(files)
-    numb_to_cpy = int(biggest - len(files))
-    if numb_to_cpy == 0:
-        continue
-    for i in range(numb_to_cpy):
-        src = os.path.join(dir, files[i%numb_files])
-        suffix = i//numb_files
-        dst = os.path.join(dir, "cpy_"+str(suffix) + files[i%numb_files])
-        copyfile(src, dst)
+    # balance the training dataset
+    for key, _ in allfiles.items():
+        dir = os.path.join(data_dir_train, key)
+        files = os.listdir(dir)
+        numb_files = len(files)
+        numb_to_cpy = int(biggest - len(files))
+        if numb_to_cpy == 0:
+            continue
+        for i in range(numb_to_cpy):
+            src = os.path.join(dir, files[i%numb_files])
+            suffix = i//numb_files
+            dst = os.path.join(dir, "cpy_"+str(suffix) + files[i%numb_files])
+            copyfile(src, dst)
 
 
 
