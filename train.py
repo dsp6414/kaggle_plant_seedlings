@@ -1,4 +1,8 @@
-
+'''
+Create datasets, train last fc layer
+then unfreeze model, apply differential learning rate to model
+train full stack
+'''
 # imports
 import torch
 import torch.nn as nn
@@ -14,6 +18,9 @@ import copy
 
 #Add a ref to directory where train/test data is
 data_dir = "/home/keith/data/plant_seedlings"
+
+#where to save model checkpoint
+cp_file = 'bestweights.ckpt'
 
 #load the data
 # Data augmentation and normalization for training
@@ -47,8 +54,23 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 # Load a model
-def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
+def train_model(model, criterion, optimizer, scheduler, num_epochs=25, use_saved_weights = True):
+    '''
+    train model and save parameters
+    :param model:
+    :param criterion: loss function
+    :param optimizer: how to optimize the loss function
+    :param scheduler: lr scheduler
+    :param num_epochs:
+    :param use_saved_weights: if True will load the last best saved weights
+    :return: the model with the best set of weights that have been found
+    '''
     since = time.time()
+
+    if (use_saved_weights == True):
+        # load best model and optimizer
+        checkpoint = torch.load(cp_file)
+        model.load_state_dict(checkpoint['state_dict'])
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
@@ -99,11 +121,15 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                 phase, epoch_loss, epoch_acc))
 
             # deep copy the model
-            if phase == 'val' and epoch_acc > best_acc:
+            if phase == 'val' and epoch_acc>best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
-
-        print()
+                # Save the model checkpoint
+                mod_opt_state = {
+                    'state_dict': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                }
+                torch.save(mod_opt_state, cp_file)
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(
@@ -167,45 +193,51 @@ model_conv = torchvision.models.resnet50(pretrained=True)
 for param in model_conv.parameters():
     param.requires_grad = False
 
-#inputs and outputs to fc layer
+#configure fc layer
 num_linear_inputs = model_conv.fc.in_features
 num_outputs = 12 # number of weedlings
 model_conv.fc = nn.Linear(num_linear_inputs, num_outputs)
 model_conv = model_conv.to(device)
 
+#model parameters
 criterion = nn.CrossEntropyLoss()
 opt = optim.Adam(model_conv.fc.parameters(), lr=0.001, weight_decay=1e-5)
 exp_lr_scheduler = lr_scheduler.StepLR(opt, step_size=7, gamma=0.1) # Decay LR by a factor of 0.1 every 7 epochs
 
-#######################################
-# train just fc layer
-model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler, num_epochs=4)
+# start with original model weights, train just fc layer
+model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler, num_epochs=10, use_saved_weights = False)
 
 #######################################
-#unfreeze it all and retrain using differential learning rates
+#now train entire model (including fc layer) using differential learning rates
 for param in model_conv.parameters():
     param.requires_grad = True
 
 model_conv = model_conv.to(device)
 
-# now train whole thing with diferential learning rates
-lrs = [.0001, .00033, .001]
-params = get_param_list(model_conv, lrs)
+lrs = [.0001, .00033, .001]     #for images similar to imagenet the learning rates can vary by *10, if not by about .33
+                                #this dataset is masked, so different, so use .33
+params = get_param_list(model_conv, lrs)    #apply lr evenly
 opt = optim.Adam(params, lr=.0001, eps=1e-8, weight_decay=1e-5 )
 
-# fine tune
-model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,
-                       num_epochs=4)
+# fine tune entire model
+model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,num_epochs=10)
 
-# generate final submission
-test_data_transform = transforms.Compose([
-         transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
-image_dataset = datasets.ImageFolder(root=os.path.join(data_dir, 'test'),
-                                           transform=test_data_transform)
-dataset_loader = torch.utils.data.DataLoader(image_dataset,
-                                             batch_size=4, shuffle=False,
-                                             num_workers=4)
-model_ft
+#######################################
+#combine both datasets and train for 2 more epochs
+print ("size training set before combo is" + str(len(image_datasets['train'])))
+image_datasets['train'] =  image_datasets['train'] + image_datasets['val']  #the key bit, although val is useless here
+print ("size training set after combo is" + str(len(image_datasets['train'])))
+
+dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=32,
+                                             shuffle=True, num_workers=4)
+              for x in ['train', 'val']}
+
+# fine tune entire model with complete dataset
+model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,num_epochs=3)
+
+#######################################
+#train with pseudolabeled data
+
+
+
 
