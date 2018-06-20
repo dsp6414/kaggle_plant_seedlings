@@ -207,7 +207,7 @@ opt = optim.Adam(model_conv.fc.parameters(), lr=0.001, weight_decay=1e-5)
 exp_lr_scheduler = lr_scheduler.StepLR(opt, step_size=7, gamma=0.1) # Decay LR by a factor of 0.1 every 7 epochs
 
 # start with original model weights, train just fc layer
-model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler, num_epochs=4, use_saved_weights = False)
+model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler, num_epochs=5, use_saved_weights = False)
 gen_submission("preds_1.csv")
 
 #######################################
@@ -223,7 +223,7 @@ params = get_param_list(model_conv, lrs)    #apply lr evenly
 opt = optim.Adam(params, lr=.0001, eps=1e-8, weight_decay=1e-5 )
 
 # fine tune entire model
-model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,num_epochs=5)
+model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,num_epochs=7)
 gen_submission("preds_2.csv")
 
 #######################################
@@ -244,14 +244,14 @@ gen_submission("preds_3.csv")
 #train with pseudolabeled data
 train_dir = "/home/keith/data/plant_seedlings/train"
 labels = sorted(next(os.walk(train_dir))[1])
-csv_ds = CSV_Dataset(csv_file="preds.csv", root_dir="/home/keith/data/plant_seedlings/test/tst/",
+csv_ds = CSV_Dataset(csv_file="preds_3.csv", root_dir="/home/keith/data/plant_seedlings/test/tst/",
                      possible_labels=labels, transform=data_transforms['train'])
 
 print ("size training set before adding knowledge distillation test set is" + str(len(image_datasets['train'])))
 image_datasets['train'] =  image_datasets['train'] + csv_ds  #the key bit
 print ("size training set after combo is" + str(len(image_datasets['train'])))
 
-model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,num_epochs=2)
+model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,num_epochs=3)
 gen_submission("preds_4.csv")
 
 
