@@ -56,10 +56,11 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 # Load a model
-def train_model(model, criterion, optimizer, scheduler, num_epochs=25, use_saved_weights = True):
+def train_model(model, device, criterion, optimizer, scheduler, num_epochs=25,use_saved_weights = True):
     '''
     train model and save parameters
     :param model:
+    :param device: cpu or gpu
     :param criterion: loss function
     :param optimizer: how to optimize the loss function
     :param scheduler: lr scheduler
@@ -71,8 +72,9 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25, use_saved
 
     if (use_saved_weights == True):
         # load best model and optimizer
-        checkpoint = torch.load(cp_file)
-        model.load_state_dict(checkpoint['state_dict'])
+        model.load_state_dict(torch.load(cp_file))
+        model = model.to(device)
+        print("Loading best weights")
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
@@ -119,19 +121,16 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25, use_saved
             epoch_loss = running_loss / dataset_sizes[phase]
             epoch_acc = running_corrects.double() / dataset_sizes[phase]
 
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(
-                phase, epoch_loss, epoch_acc))
+            print('{} Loss: {:.4f} Acc: {:.4f}-- {:.4f}'.format(
+                phase, epoch_loss, epoch_acc, dataset_sizes[phase]))
 
             # deep copy the model
             if phase == 'val' and epoch_acc>best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
                 # Save the model checkpoint
-                mod_opt_state = {
-                    'state_dict': model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                }
-                torch.save(mod_opt_state, cp_file)
+                torch.save(model.state_dict(), cp_file)
+                print("saving best weights for epoch " + str(epoch))
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(
@@ -139,7 +138,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25, use_saved
     print('Best val Acc: {:4f}'.format(best_acc))
 
     # load best model weights
-    model.load_state_dict(best_model_wts)
+    model.load_state_dict(torch.load(cp_file))
     return model
 
 def freeze_first_n_layers(model, numb_layers):
@@ -202,12 +201,13 @@ model_conv.fc = nn.Linear(num_linear_inputs, num_outputs)
 model_conv = model_conv.to(device)
 
 #model parameters
+lr = 0.01
 criterion = nn.CrossEntropyLoss()
-opt = optim.Adam(model_conv.fc.parameters(), lr=0.001, weight_decay=1e-5)
+opt = optim.Adam(model_conv.fc.parameters(), lr=lr, weight_decay=1e-5)
 exp_lr_scheduler = lr_scheduler.StepLR(opt, step_size=7, gamma=0.1) # Decay LR by a factor of 0.1 every 7 epochs
 
 # start with original model weights, train just fc layer
-model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler, num_epochs=5, use_saved_weights = False)
+model_ft = train_model(model_conv,device, criterion, opt, exp_lr_scheduler, num_epochs=3, use_saved_weights = False)
 gen_submission("preds_1.csv")
 
 #######################################
@@ -217,13 +217,15 @@ for param in model_conv.parameters():
 
 model_conv = model_conv.to(device)
 
+# lrs = [lr/18,lr/6,lr/2]
+
 lrs = [.0001, .00033, .001]     #for images similar to imagenet the learning rates can vary by *10, if not by about .33
                                 #this dataset is masked, so different, so use .33
 params = get_param_list(model_conv, lrs)    #apply lr evenly
 opt = optim.Adam(params, lr=.0001, eps=1e-8, weight_decay=1e-5 )
 
 # fine tune entire model
-model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,num_epochs=7)
+model_ft = train_model(model_conv,device, criterion, opt, exp_lr_scheduler,num_epochs=10)
 gen_submission("preds_2.csv")
 
 #######################################
@@ -237,7 +239,7 @@ dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=32,
               for x in ['train', 'val']}
 
 # fine tune entire model with complete dataset
-model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,num_epochs=3)
+model_ft = train_model(model_conv,device, criterion, opt, exp_lr_scheduler,num_epochs=5)
 gen_submission("preds_3.csv")
 
 #######################################
@@ -251,7 +253,7 @@ print ("size training set before adding knowledge distillation test set is" + st
 image_datasets['train'] =  image_datasets['train'] + csv_ds  #the key bit
 print ("size training set after combo is" + str(len(image_datasets['train'])))
 
-model_ft = train_model(model_conv, criterion, opt, exp_lr_scheduler,num_epochs=3)
+model_ft = train_model(model_conv,device, criterion, opt, exp_lr_scheduler,num_epochs=3)
 gen_submission("preds_4.csv")
 
 

@@ -48,15 +48,14 @@ def gen_submission(pred_file = "preds.csv"):
     num_linear_inputs = model_pred.fc.in_features
     num_outputs = 12  # number of weedlings
     model_pred.fc = nn.Linear(num_linear_inputs, num_outputs)
-    model_conv = model_pred.to(device)
     criterion = nn.CrossEntropyLoss()
     # opt = optim.Adam(model_pred.fc.parameters(), lr=0.001, weight_decay=1e-5)
     # exp_lr_scheduler = lr_scheduler.StepLR(opt, step_size=7, gamma=0.1) # Decay LR by a factor of 0.1 every 7 epochs
     # load best model
-    checkpoint = torch.load(cp_file)
-    model_pred.load_state_dict(checkpoint['state_dict'])
+    model_pred.load_state_dict(torch.load(cp_file))
     # we are evaluating now
-    model_pred.eval()
+    model_pred = model_pred.eval()
+    model_pred = model_pred.to(device)
     # we are not doing any gradients on predictions
     preds_file = open(pred_file, "w")
     preds_file.write('file,species\n')
